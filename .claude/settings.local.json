@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python run_ast.py)",
+      "Bash(python -c \"import sys; print\\('\\\\n'.join\\(sys.path\\)\\)\")",
+      "Bash(ls \"C:\\\\Users\\\\Israel\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python311\\\\Lib\\\\site-packages\" | grep -i graphify)",
+      "Bash(python build_graph.py)",
+      "Bash(npm install *)",
+      "Bash(timeout 8 npm run dev)",
+      "Bash(npm audit *)",
+      "Bash(npm run *)",
+      "Bash(git add *)",
+      "Bash(mkdir -p \"C:\\\\Users\\\\Israel\\\\OneDrive\\\\Documentos\\\\Work\\\\ProjetoES\\\\.claude\\\\worktrees\\\\keen-payne-be78d1\\\\app\\\\pedidos\\\\[id]\\\\checkin\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\Israel\\\\OneDrive\\\\Documentos\\\\Work\\\\ProjetoES\\\\.claude\\\\worktrees\\\\keen-payne-be78d1\\\\app\\\\pedidos\\\\[id]\\\\evidencias\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\Israel\\\\OneDrive\\\\Documentos\\\\Work\\\\ProjetoES\\\\.claude\\\\worktrees\\\\keen-payne-be78d1\\\\app\\\\pedidos\\\\[id]\\\\concluir\")",
+      "Bash(cd \"C:\\\\Users\\\\Israel\\\\OneDrive\\\\Documentos\\\\Work\\\\ProjetoES\" && find . -name \"prd*\" -o -name \"PRD*\" 2>/dev/null | grep -v node_modules | grep -v .next | head -10)",
+      "Bash(npx next *)"
+    ]
+  }
+}
