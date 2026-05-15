@@ -4,14 +4,38 @@ import type { NextRequest } from 'next/server'
 
 // Routes that require authentication
 const PROTECTED = ['/me', '/cliente', '/prestador', '/admin', '/onboarding', '/pedidos', '/feed']
+
 // Routes that authenticated users should not see
 const AUTH_ONLY = ['/login', '/cadastro']
 
+function isPublicAsset(pathname: string) {
+  return (
+    pathname === '/manifest.json' ||
+    pathname === '/favicon.ico' ||
+    pathname === '/sw.js' ||
+    pathname === '/robots.txt' ||
+    pathname === '/sitemap.xml' ||
+    pathname.startsWith('/icons/') ||
+    /\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|json|map|txt)$/i.test(pathname)
+  )
+}
+
 export async function middleware(request: NextRequest) {
-  // Skip if Supabase is not configured (dev without .env.local)
+  const { pathname } = request.nextUrl
+
+  // Public assets must never go through auth/session logic.
+  // Otherwise manifest.json, sw.js, icons, etc. can get 401 and the PWA/browser complains.
+  if (isPublicAsset(pathname)) {
+    return NextResponse.next()
+  }
+
+  // Skip if Supabase is not configured
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  if (!url || !key) return NextResponse.next()
+
+  if (!url || !key) {
+    return NextResponse.next()
+  }
 
   let response = NextResponse.next({ request })
 
@@ -22,29 +46,33 @@ export async function middleware(request: NextRequest) {
       },
       setAll(cookiesToSet) {
         // Propagate updated cookies to both request and response
-        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
+        cookiesToSet.forEach(({ name, value }) => {
+          request.cookies.set(name, value)
+        })
+
         response = NextResponse.next({ request })
-        cookiesToSet.forEach(({ name, value, options }) =>
+
+        cookiesToSet.forEach(({ name, value, options }) => {
           response.cookies.set(name, value, options)
-        )
+        })
       },
     },
   })
 
-  // Refresh session — must use getUser(), not getSession() (security requirement)
+  // Refresh session. Supabase recommends getUser() instead of trusting getSession().
   const {
     data: { user },
   } = await supabase.auth.getUser()
 
-  const { pathname } = request.nextUrl
-
   // Unauthenticated user hitting protected route → login
-  if (!user && PROTECTED.some((p) => pathname.startsWith(p))) {
-    return NextResponse.redirect(new URL('/login', request.url))
+  if (!user && PROTECTED.some((path) => pathname.startsWith(path))) {
+    const loginUrl = new URL('/login', request.url)
+    loginUrl.searchParams.set('next', pathname)
+    return NextResponse.redirect(loginUrl)
   }
 
   // Authenticated user hitting login/cadastro → /me
-  if (user && AUTH_ONLY.some((p) => pathname.startsWith(p))) {
+  if (user && AUTH_ONLY.some((path) => pathname.startsWith(path))) {
     return NextResponse.redirect(new URL('/me', request.url))
   }
 
@@ -53,7 +81,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Skip Next.js internals and static files
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|manifest.json|sw.js|robots.txt|sitemap.xml|icons/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|json|map|txt)$).*)',
   ],
 }
