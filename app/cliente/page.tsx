@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { signOut } from '@/server/auth'
+import { SERVICE_CATEGORIES } from '@/lib/constants'
 import type { CustomerProfile, ServiceRequest } from '@/types/database'
 
 export const dynamic = 'force-dynamic'
@@ -130,7 +131,7 @@ export default async function ClientePage({
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="font-medium text-gray-900">
-                        {request.category_slug}
+                        {SERVICE_CATEGORIES.find((c) => c.slug === request.category_slug)?.label ?? request.category_slug}
                       </p>
                       <p className="mt-1 line-clamp-1 text-sm text-gray-500">
                         {request.description}

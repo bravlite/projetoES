@@ -23,10 +23,31 @@ export default async function MePage({
     .maybeSingle()
 
   const profile = rawProfile as { role?: string } | null
-  const suffix = searchParams?.confirmed === '1' ? '?confirmed=1' : ''
+  const confirmed = searchParams?.confirmed === '1'
+  const suffix = confirmed ? '?confirmed=1' : ''
 
-  if (profile?.role === 'provider') redirect(`/prestador${suffix}`)
+  // Admin vai direto para o painel
   if (profile?.role === 'admin') redirect('/admin')
 
+  // Prestador: verifica se já completou o perfil
+  if (profile?.role === 'provider') {
+    const { data: pp } = await supabase
+      .from('provider_profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!pp) redirect('/onboarding/prestador')
+    redirect(`/prestador${suffix}`)
+  }
+
+  // Cliente (default): verifica se já completou o perfil
+  const { data: cp } = await supabase
+    .from('customer_profiles')
+    .select('id')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  if (!cp) redirect('/onboarding/cliente')
   redirect(`/cliente${suffix}`)
 }
