@@ -181,8 +181,7 @@ export async function acceptQuote(quoteId: string, _formData: FormData): Promise
   } | null
 
   if (!quote || quote.status !== 'pending') {
-    // Redireciona de volta com erro no query param
-    redirect(`/pedidos?error=Orçamento inválido ou já processado.`)
+    redirect(`/pedidos?error=${encodeURIComponent('Orçamento inválido ou já processado.')}`)
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -194,7 +193,7 @@ export async function acceptQuote(quoteId: string, _formData: FormData): Promise
   const req = r as { id: string; status: string; customer_id: string } | null
 
   if (!req || req.customer_id !== user.id) {
-    redirect(`/pedidos?error=Sem permissão.`)
+    redirect(`/pedidos?error=${encodeURIComponent('Sem permissão.')}`)
   }
 
   // Aceita este orçamento

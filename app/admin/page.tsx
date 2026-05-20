@@ -51,7 +51,7 @@ export default async function AdminPage() {
       href: '/admin/prestadores',
       count: pendingProviders as number | null,
       urgent: (pendingProviders as number) > 0,
-      implemented: false,
+      implemented: true,
     },
     {
       label: 'Pedidos ativos',

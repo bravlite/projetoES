@@ -36,6 +36,13 @@ export async function upsertProviderProfile(formData: FormData): Promise<{ error
   const categories = formData.getAll('categories') as string[]
   const neighborhoods = formData.getAll('neighborhoods') as string[]
 
+  if (categories.length === 0) {
+    return { error: 'Selecione pelo menos uma categoria de serviço.' }
+  }
+  if (neighborhoods.length === 0) {
+    return { error: 'Selecione pelo menos um bairro de atendimento.' }
+  }
+
   const { error } = await supabase.from('provider_profiles').upsert(
     {
       user_id: user.id,

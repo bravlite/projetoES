@@ -51,37 +51,38 @@ export default async function AdminDisputasPage() {
   const profile = rawProfile as Pick<Profile, 'role'> | null
   if (!profile || profile.role !== 'admin') redirect('/')
 
-  // Busca disputas abertas ordenadas por urgência (valor desc, abertura asc)
+  // Busca disputas abertas
   const { data: rawDisputes } = await admin
     .from('disputes')
-    .select(`
-      id,
-      order_id,
-      reason_code,
-      status,
-      created_at,
-      service_requests!order_id (
-        category_slug,
-        final_value_cents
-      )
-    `)
+    .select('id, order_id, reason_code, status, created_at')
     .neq('status', 'resolved')
     .order('created_at', { ascending: true })
 
-  type DisputeRow = {
-    id: string
-    order_id: string
-    reason_code: string
-    status: string
-    created_at: string
-    service_requests: { category_slug: string; final_value_cents: number | null } | null
-  }
+  type DisputeBase = { id: string; order_id: string; reason_code: string; status: string; created_at: string }
+  type DisputeRow = DisputeBase & { service_requests: { category_slug: string; final_value_cents: number | null } | null }
 
-  const disputes = ((rawDisputes as DisputeRow[]) ?? []).sort((a, b) => {
-    const va = a.service_requests?.final_value_cents ?? 0
-    const vb = b.service_requests?.final_value_cents ?? 0
-    return vb - va // valor desc
-  })
+  const disputeList = (rawDisputes as DisputeBase[]) ?? []
+
+  // Busca pedidos relacionados em uma única query (evita join ambíguo em PostgREST v9)
+  const orderIds = disputeList.map((d) => d.order_id)
+  const { data: rawOrders } = orderIds.length
+    ? await admin
+        .from('service_requests')
+        .select('id, category_slug, final_value_cents')
+        .in('id', orderIds)
+    : { data: [] }
+  const orderMap = new Map(
+    ((rawOrders as { id: string; category_slug: string; final_value_cents: number | null }[]) ?? [])
+      .map((r) => [r.id, r])
+  )
+
+  const disputes: DisputeRow[] = disputeList
+    .map((d) => ({ ...d, service_requests: orderMap.get(d.order_id) ?? null }))
+    .sort((a, b) => {
+      const va = a.service_requests?.final_value_cents ?? 0
+      const vb = b.service_requests?.final_value_cents ?? 0
+      return vb - va // valor desc
+    })
 
   // Busca totais para o cabeçalho
   const { data: rawAll } = await admin

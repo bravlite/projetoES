@@ -81,7 +81,7 @@ CREATE TRIGGER service_quotes_updated_at
 
 -- FK circular service_requests → service_quotes
 ALTER TABLE service_requests
-  ADD CONSTRAINT IF NOT EXISTS fk_accepted_quote
+  ADD CONSTRAINT fk_accepted_quote
   FOREIGN KEY (accepted_quote_id) REFERENCES service_quotes(id) ON DELETE SET NULL;
 
 -- -----------------------------------------------------------------------

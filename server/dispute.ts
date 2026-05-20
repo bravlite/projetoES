@@ -68,7 +68,7 @@ export async function openDispute(requestId: string, formData: FormData): Promis
 
   const now = new Date().toISOString()
 
-  // Cria disputa
+  // Cria disputa com status 'open', avança para 'awaiting_provider' após mensagem inicial
   const { data: newDispute, error: insertErr } = await admin
     .from('disputes')
     .insert({
@@ -77,7 +77,7 @@ export async function openDispute(requestId: string, formData: FormData): Promis
       provider_id: req.current_provider_id,
       reason_code,
       description,
-      status: 'awaiting_provider',
+      status: 'open',
     })
     .select('id')
     .single()
@@ -94,6 +94,12 @@ export async function openDispute(requestId: string, formData: FormData): Promis
     author_role: 'customer',
     body: description,
   })
+
+  // Avança para awaiting_provider após registrar a mensagem
+  await admin
+    .from('disputes')
+    .update({ status: 'awaiting_provider' })
+    .eq('id', disputeId)
 
   // Atualiza status do pedido
   await admin

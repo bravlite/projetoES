@@ -1,7 +1,7 @@
 import { redirect, notFound } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { acceptQuote } from '@/server/requests'
+import { acceptQuote, regeneratePixCharge } from '@/server/requests'
 import type {
   Profile,
   ServiceRequest,
@@ -115,20 +115,24 @@ export default async function PedidoDetailPage({
 
     const rawList = (rawQuotes as ServiceQuote[]) ?? []
 
-    // Enriquece com nome do prestador
-    quotes = await Promise.all(
-      rawList.map(async (q) => {
-        const { data: pp } = await supabase
+    // Busca todos os nomes de prestadores em uma única query (evita N+1)
+    const providerIds = rawList.map((q) => q.provider_id)
+    const { data: rawProviders } = providerIds.length
+      ? await supabase
           .from('provider_profiles')
-          .select('display_name')
-          .eq('id', q.provider_id)
-          .single()
-        return {
-          ...q,
-          providerName: (pp as { display_name: string | null } | null)?.display_name ?? 'Prestador',
-        }
-      })
+          .select('id, display_name')
+          .in('id', providerIds)
+      : { data: [] }
+    const providerMap = new Map(
+      ((rawProviders as { id: string; display_name: string | null }[]) ?? []).map((p) => [
+        p.id,
+        p.display_name,
+      ])
     )
+    quotes = rawList.map((q) => ({
+      ...q,
+      providerName: providerMap.get(q.provider_id) ?? 'Prestador',
+    }))
   } else if (profile.role === 'provider' && providerProfile) {
     const { data: rawQ } = await supabase
       .from('service_quotes')
@@ -310,6 +314,23 @@ export default async function PedidoDetailPage({
           >
             Enviar orçamento
           </Link>
+        </div>
+      )}
+
+      {/* quote_accepted sem pagamento — Pix falhou, permitir retry */}
+      {req.status === 'quote_accepted' && isCustomer && (
+        <div className="mt-6 rounded-lg border border-yellow-200 bg-yellow-50 p-4">
+          <p className="mb-3 text-sm font-medium text-yellow-800">
+            Orçamento aceito, mas houve um problema ao gerar o Pix. Tente novamente.
+          </p>
+          <form action={regeneratePixCharge.bind(null, req.id)}>
+            <button
+              type="submit"
+              className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+            >
+              Gerar Pix →
+            </button>
+          </form>
         </div>
       )}
 

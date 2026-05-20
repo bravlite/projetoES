@@ -213,11 +213,12 @@ export async function addEvidence(formData: FormData): Promise<{ error?: string 
   }
 
   // Upload para Supabase Storage (bucket 'evidence')
+  // Usa admin client — bucket é privado e não tem policy de INSERT para anon
   const ext = (file.name.split('.').pop() ?? 'jpg').toLowerCase()
   const filePath = `${requestId}/${providerProfile.id}/${kind}_${Date.now()}.${ext}`
   const buffer = Buffer.from(await file.arrayBuffer())
 
-  const { error: uploadError } = await supabase.storage
+  const { error: uploadError } = await admin.storage
     .from('evidence')
     .upload(filePath, buffer, {
       contentType: file.type || 'image/jpeg',
@@ -340,17 +341,26 @@ export async function confirmCompletion(requestId: string, _formData: FormData):
 
   const now = new Date().toISOString()
 
+  // Verifica se payout existe (pode não existir em mock mode ou se webhook falhou)
+  const { data: existingPayout } = await admin
+    .from('payouts')
+    .select('id')
+    .eq('order_id', requestId)
+    .maybeSingle()
+
   await admin
     .from('service_requests')
     .update({ status: 'accepted_by_customer' })
     .eq('id', requestId)
 
-  // Payout vira elegível para repasse
-  await admin
-    .from('payouts')
-    .update({ status: 'eligible', eligible_at: now })
-    .eq('order_id', requestId)
-    .eq('status', 'pending')
+  // Payout vira elegível para repasse (só atualiza se existir)
+  if (existingPayout) {
+    await admin
+      .from('payouts')
+      .update({ status: 'eligible', eligible_at: now })
+      .eq('order_id', requestId)
+      .eq('status', 'pending')
+  }
 
   await admin.from('service_order_events').insert({
     request_id: requestId,

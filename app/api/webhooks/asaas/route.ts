@@ -81,13 +81,17 @@ export async function POST(request: NextRequest) {
   // Gera código de check-in: 6 dígitos entre 100000-999999
   const checkInCode = (Math.floor(100000 + Math.random() * 900000)).toString()
 
-  // ── Comissão: 15%, mínimo R$10 ───────────────────────────────────────────
+  // ── Comissão: 15% do bruto, mínimo R$10 ─────────────────────────────────
+  // netValueCents = o que o Asaas realmente nos repassa (bruto - taxa Asaas)
+  // commissionCents = nossa comissão sobre o bruto
+  // providerNetCents = netValueCents - commissionCents (o que o prestador recebe)
   const commissionRate = 0.15
   const minCommissionCents = 1000
+  const netValueCents = Math.round(payment.netValue * 100)  // após taxa Asaas
   const commissionCents = Math.max(Math.round(grossCents * commissionRate), minCommissionCents)
-  const netCents = grossCents - commissionCents
+  const netCents = netValueCents - commissionCents
 
-  // ── Atualiza payment ──────────────────────────────────────────────────────
+  // ── Atualiza payment (idempotência: marca como paid primeiro) ─────────────
   await admin
     .from('payments')
     .update({
@@ -106,19 +110,22 @@ export async function POST(request: NextRequest) {
     })
     .eq('id', orderId)
 
-  // ── Cria payout (status=pending — elegível após conclusão) ────────────────
+  // ── Cria payout com ON CONFLICT para evitar duplicata em retry ────────────
   if (sr.current_provider_id) {
-    await admin.from('payouts').insert({
-      order_id: orderId,
-      provider_id: sr.current_provider_id,
-      payment_id: existingPayment.id,
-      gross_cents: grossCents,
-      commission_cents: commissionCents,
-      net_cents: netCents,
-      commission_rate: commissionRate,
-      min_commission_cents: minCommissionCents,
-      status: 'pending',
-    })
+    await admin.from('payouts').upsert(
+      {
+        order_id: orderId,
+        provider_id: sr.current_provider_id,
+        payment_id: existingPayment.id,
+        gross_cents: grossCents,
+        commission_cents: commissionCents,
+        net_cents: netCents,
+        commission_rate: commissionRate,
+        min_commission_cents: minCommissionCents,
+        status: 'pending',
+      },
+      { onConflict: 'order_id', ignoreDuplicates: true }
+    )
   }
 
   // ── Audit trail ───────────────────────────────────────────────────────────

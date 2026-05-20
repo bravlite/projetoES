@@ -52,6 +52,8 @@ export type Profile = {
   id: string
   role: Role
   status: UserStatus
+  terms_accepted_at: string | null  // migration 011
+  deleted_at: string | null          // migration 011
   created_at: string
   updated_at: string
 }
@@ -63,6 +65,8 @@ export type CustomerProfile = {
   phone: string | null
   neighborhood: string | null
   city: string | null
+  strikes: number             // migration 009
+  deleted_at: string | null   // migration 011
   created_at: string
   updated_at: string
 }
@@ -76,6 +80,8 @@ export type ProviderProfile = {
   categories: string[]
   neighborhoods: string[]
   approved: boolean
+  strikes: number             // migration 009
+  deleted_at: string | null   // migration 011
   created_at: string
   updated_at: string
 }
