@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { refundPixPayment } from '@/lib/asaas'
 import type { Profile, ProviderProfile, DisputeReasonCode, DisputeDecision } from '@/types/database'
 
 // ------------------------------------------------------------
@@ -40,8 +41,14 @@ export async function openDispute(requestId: string, formData: FormData): Promis
 
   if (!req) return { error: 'Pedido não encontrado.' }
   if (req.customer_id !== user.id) return { error: 'Acesso negado.' }
-  if (!['completed_by_provider', 'in_progress'].includes(req.status)) {
-    return { error: 'Disputa só pode ser aberta quando o serviço estiver em andamento ou aguardando confirmação.' }
+  // Inclui payment_confirmed/checked_in: cliente pagou e o prestador sumiu
+  // (no_show) — sem isso o dinheiro ficava preso sem caminho de saída.
+  if (
+    !['payment_confirmed', 'checked_in', 'in_progress', 'completed_by_provider'].includes(
+      req.status
+    )
+  ) {
+    return { error: 'Disputa só pode ser aberta após o pagamento e antes da confirmação final.' }
   }
   if (!req.current_provider_id) return { error: 'Pedido sem prestador atribuído.' }
 
@@ -315,6 +322,50 @@ export async function resolveDispute(
       .eq('status', 'blocked')
   }
 
+  // ── Estorno real no PSP ─────────────────────────────────────────────────
+  // refund_full: estorna automaticamente via Asaas.
+  // refund_partial: valor não é capturado no formulário — estorno manual.
+  let refundNote = ''
+  if (isRefund) {
+    const { data: paidRow } = await admin
+      .from('payments')
+      .select('id, psp_charge_id, amount_cents')
+      .eq('order_id', dispute.order_id)
+      .eq('status', 'paid')
+      .maybeSingle()
+    const paidPayment = paidRow as {
+      id: string
+      psp_charge_id: string | null
+      amount_cents: number
+    } | null
+
+    if (decision === 'refund_full' && paidPayment?.psp_charge_id) {
+      try {
+        const { isMock } = await refundPixPayment({
+          chargeId: paidPayment.psp_charge_id,
+          description: `Disputa ${disputeId} — reembolso integral`,
+        })
+        await admin.from('payments').update({ status: 'refunded' }).eq('id', paidPayment.id)
+        await admin.from('financial_events').insert({
+          event_type: 'refund_issued',
+          order_id: dispute.order_id,
+          payment_id: paidPayment.id,
+          actor_id: user.id,
+          amount_cents: paidPayment.amount_cents,
+          metadata: { dispute_id: disputeId, decision, is_mock: isMock },
+        })
+        refundNote = '\n\n💸 Estorno integral processado via Asaas.'
+      } catch (err) {
+        console.error(`[resolveDispute] Falha no estorno Asaas da disputa ${disputeId}:`, err)
+        refundNote =
+          '\n\n⚠️ Estorno automático FALHOU — processar manualmente no painel do Asaas.'
+      }
+    } else if (decision === 'refund_partial') {
+      refundNote =
+        '\n\n⚠️ Reembolso parcial: processar o estorno manualmente no painel do Asaas (valor a critério da decisão).'
+    }
+  }
+
   // Strike no perdedor (provider ou customer) — fetch + increment manual
   // 3 strikes → suspensão automática
   if (isRefund) {
@@ -361,7 +412,7 @@ export async function resolveDispute(
     dispute_id: disputeId,
     author_id: user.id,
     author_role: 'admin',
-    body: `✅ Decisão: **${decision}**\n\n${justification}`,
+    body: `✅ Decisão: **${decision}**\n\n${justification}${refundNote}`,
   })
 
   // Audit trail

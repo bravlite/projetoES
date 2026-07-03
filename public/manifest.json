@@ -4,8 +4,8 @@
   "description": "Contrate serviços domésticos e pague só quando estiver pronto.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#2563eb",
+  "background_color": "#fbf9f5",
+  "theme_color": "#1f5f66",
   "orientation": "portrait-primary",
   "icons": [
     {

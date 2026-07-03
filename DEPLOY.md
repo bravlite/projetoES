@@ -25,18 +25,29 @@
    - `service_role secret` → `SUPABASE_SERVICE_ROLE_KEY` ⚠️ nunca expor no frontend
 4. Vá em **SQL Editor** e rode cada arquivo de migração em ordem:
    ```
-   migrations/001_schema.sql
-   migrations/002_*.sql
-   ...
+   migrations/001_helpers.sql
+   migrations/002_profiles.sql
+   migrations/003_customer_profiles.sql
+   migrations/004_provider_profiles.sql
+   migrations/005_addresses.sql
+   migrations/006_service_requests.sql
+   migrations/007_payments.sql
+   migrations/008_evidence.sql
+   migrations/009_disputes.sql
+   migrations/010_reviews.sql
    migrations/011_lgpd.sql
+   migrations/012_hardening.sql
    ```
-5. Em **Authentication → URL Configuration**, adicione:
+5. Em **Storage**, crie um bucket privado chamado `evidence` (usado pelas fotos de evidência — o upload passa pelo servidor via service_role).
+6. Em **Authentication → URL Configuration**, adicione:
    - Site URL: `https://seu-dominio.vercel.app`
    - Redirect URL: `https://seu-dominio.vercel.app/auth/callback`
 
 ---
 
-### 2. Cloudflare R2 (fotos de evidência)
+### 2. Cloudflare R2 (opcional — NÃO usado atualmente)
+
+> ⚠️ O código atual armazena as fotos de evidência no **Supabase Storage** (bucket `evidence`, ver passo 1.5). As variáveis `R2_*` existem para uma migração futura e podem ficar vazias. Pule esta seção no MVP.
 
 1. Acesse [dash.cloudflare.com](https://dash.cloudflare.com) → **R2** → **Create bucket**
 2. Nome do bucket: `concluido-uploads`

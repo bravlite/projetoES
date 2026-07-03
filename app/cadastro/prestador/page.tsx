@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useState, useTransition } from 'react'
 import { signUp } from '@/server/auth'
+import { LogoMark } from '@/components/Logo'
 
 export default function CadastroPrestadorPage() {
   const [error, setError] = useState<string | null>(null)
@@ -27,76 +28,91 @@ export default function CadastroPrestadorPage() {
 
   return (
     <div className="mx-auto max-w-sm px-4 py-16">
-      <h1 className="mb-2 text-2xl font-bold text-gray-900">Criar conta — Prestador</h1>
-      <p className="mb-8 text-sm text-gray-500">
-        Após confirmar o email, você completará seu perfil profissional.
-      </p>
+      <div className="card !p-8">
+        <div className="mb-6 flex flex-col items-center text-center">
+          <LogoMark className="mb-3 h-12 w-12" />
+          <h1 className="text-2xl font-bold tracking-tight text-brand-900">
+            Conta de prestador
+          </h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Receba pedidos do seu bairro. Sem mensalidade — comissão só quando você recebe.
+          </p>
+        </div>
 
-      {success ? (
-        <div className="rounded-md bg-brand-50 p-4 text-sm text-brand-700">{success}</div>
-      ) : (
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div>
-            <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-700">
-              Email
+        {success ? (
+          <div className="rounded-xl bg-brand-50 p-4 text-sm text-brand-800">{success}</div>
+        ) : (
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <div>
+              <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-700">
+                Email
+              </label>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                required
+                autoComplete="email"
+                className="w-full px-3.5 py-2.5 text-sm"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="password" className="mb-1 block text-sm font-medium text-gray-700">
+                Senha
+              </label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                required
+                minLength={8}
+                autoComplete="new-password"
+                className="w-full px-3.5 py-2.5 text-sm"
+              />
+              <p className="mt-1 text-xs text-gray-400">Mínimo 8 caracteres.</p>
+            </div>
+
+            <label className="flex items-start gap-2 text-sm text-gray-600">
+              <input type="checkbox" name="terms" required className="mt-0.5 shrink-0" />
+              <span>
+                Li e aceito os{' '}
+                <Link href="/termos" target="_blank" className="text-brand-700 underline">
+                  Termos de Uso
+                </Link>{' '}
+                e a{' '}
+                <Link href="/privacidade" target="_blank" className="text-brand-700 underline">
+                  Política de Privacidade
+                </Link>
+                .
+              </span>
             </label>
-            <input
-              id="email"
-              name="email"
-              type="email"
-              required
-              autoComplete="email"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
-          </div>
 
-          <div>
-            <label htmlFor="password" className="mb-1 block text-sm font-medium text-gray-700">
-              Senha
-            </label>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              required
-              minLength={8}
-              autoComplete="new-password"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
-            <p className="mt-1 text-xs text-gray-400">Mínimo 8 caracteres.</p>
-          </div>
+            {error && (
+              <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>
+            )}
 
-          <label className="flex items-start gap-2 text-sm text-gray-600">
-            <input type="checkbox" name="terms" required className="mt-0.5 shrink-0" />
-            <span>
-              Li e aceito os{' '}
-              <Link href="/termos" target="_blank" className="text-brand-600 underline">
-                Termos de Uso
-              </Link>{' '}
-              e a{' '}
-              <Link href="/privacidade" target="_blank" className="text-brand-600 underline">
-                Política de Privacidade
-              </Link>
-              .
-            </span>
-          </label>
-
-          {error && <p className="text-sm text-red-600">{error}</p>}
-
-          <button
-            type="submit"
-            disabled={isPending}
-            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
-          >
-            {isPending ? 'Criando conta…' : 'Criar conta'}
-          </button>
-        </form>
-      )}
+            <button
+              type="submit"
+              disabled={isPending}
+              className="btn-primary disabled:opacity-50"
+            >
+              {isPending ? 'Criando conta…' : 'Criar conta de prestador'}
+            </button>
+          </form>
+        )}
+      </div>
 
       <p className="mt-6 text-center text-sm text-gray-500">
         Já tem conta?{' '}
-        <Link href="/login" className="text-brand-600 hover:underline">
+        <Link href="/login" className="font-medium text-brand-700 hover:underline">
           Entrar
+        </Link>
+      </p>
+      <p className="mt-2 text-center text-sm text-gray-500">
+        Quer contratar serviços?{' '}
+        <Link href="/cadastro/cliente" className="font-medium text-clay-600 hover:underline">
+          Conta de cliente
         </Link>
       </p>
     </div>

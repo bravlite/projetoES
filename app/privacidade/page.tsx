@@ -55,7 +55,14 @@ export default function PrivacidadePage() {
         <ul>
           <li>Dados de conta ativa: enquanto a conta existir.</li>
           <li>Registros financeiros: 5 anos (obrigação fiscal).</li>
-          <li>Evidências fotográficas: 1 ano após conclusão do pedido.</li>
+          <li>
+            Evidências fotográficas: eliminadas 90 dias após o encerramento do
+            pedido (prazo do CDC Art. 26, II para reclamação de vício aparente).
+            Se o pedido tiver disputa, retemos por 1 ano após o encerramento para
+            exercício regular de direitos (LGPD Art. 7º, VI). As fotos são
+            redimensionadas e têm metadados de localização (GPS) removidos antes
+            do armazenamento.
+          </li>
           <li>Logs de acesso: 6 meses.</li>
         </ul>
 
@@ -63,7 +70,7 @@ export default function PrivacidadePage() {
         <ul>
           <li><strong>Acesso:</strong> <code>GET /api/me/export</code> — baixe todos os seus dados em JSON.</li>
           <li><strong>Correção:</strong> edite seu perfil nas configurações da conta.</li>
-          <li><strong>Exclusão:</strong> <code>DELETE /api/me</code> anonimiza seus dados (exceto registros financeiros retidos por obrigação legal).</li>
+          <li><strong>Exclusão:</strong> <code>DELETE /api/me</code> anonimiza seus dados e apaga as fotos dos seus pedidos (exceto registros financeiros retidos por obrigação legal).</li>
           <li><strong>Portabilidade:</strong> o export JSON cobre todos os dados tratados.</li>
           <li><strong>Revogação de consentimento:</strong> desative notificações de marketing em configurações.</li>
         </ul>

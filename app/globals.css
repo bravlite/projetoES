@@ -1,3 +1,65 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ── Base: identidade Concluído ──────────────────────────────────────────── */
+@layer base {
+  body {
+    @apply bg-sand-50 text-ink;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply font-display;
+  }
+
+  ::selection {
+    @apply bg-clay-200 text-clay-950;
+  }
+
+  /* Formulários herdam a identidade sem tocar página por página.
+     Utilities locais (border-*, rounded-*) ainda vencem quando presentes. */
+  input:not([type='checkbox']):not([type='radio']),
+  select,
+  textarea {
+    @apply rounded-xl border border-gray-200 bg-white;
+  }
+
+  input:focus,
+  select:focus,
+  textarea:focus {
+    @apply border-brand-400 outline-none ring-2 ring-brand-200;
+  }
+}
+
+/* ── Componentes ─────────────────────────────────────────────────────────── */
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition-colors;
+  }
+
+  .btn-primary {
+    @apply btn bg-brand-700 text-white shadow-card hover:bg-brand-800;
+  }
+
+  .btn-clay {
+    @apply btn bg-clay-500 text-white shadow-card hover:bg-clay-600;
+  }
+
+  .btn-ghost {
+    @apply btn border border-gray-300 bg-white text-ink hover:border-brand-400 hover:text-brand-700;
+  }
+
+  .card {
+    @apply rounded-2xl border border-sand-200 bg-white p-6 shadow-card;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  .check-chip {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-white/70 px-3 py-1.5 text-xs font-medium text-brand-800 ring-1 ring-brand-200;
+  }
+}

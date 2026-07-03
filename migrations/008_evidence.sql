@@ -3,7 +3,8 @@
 
 -- ─── service_evidence ────────────────────────────────────────────────────────
 -- Fotos e evidências enviadas pelo prestador durante a execução do serviço.
--- Nunca deletar — disputas dependem desses registros.
+-- Retenção: eliminadas pelo cron 90 dias após o encerramento do pedido (1 ano
+-- se houve disputa). Fundamentação legal do prazo em lib/retention.ts.
 CREATE TABLE IF NOT EXISTS service_evidence (
   id          UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
   request_id  UUID         NOT NULL REFERENCES service_requests(id),

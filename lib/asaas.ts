@@ -11,7 +11,15 @@ const ASAAS_BASE =
     : 'https://www.asaas.com/api/v3'
 
 function isMockMode(): boolean {
-  return !process.env.ASAAS_API_KEY
+  if (process.env.ASAAS_API_KEY) return false
+  // Sem API key em produção: falhar alto em vez de gerar cobrança falsa
+  // silenciosamente (o pedido avançaria sem dinheiro real).
+  if (process.env.ASAAS_ENVIRONMENT === 'production') {
+    throw new Error(
+      'ASAAS_API_KEY ausente com ASAAS_ENVIRONMENT=production — cobrança real não pode ser criada.'
+    )
+  }
+  return true
 }
 
 async function asaasRequest<T>(path: string, method: string, body?: unknown): Promise<T> {
@@ -118,4 +126,28 @@ export async function createPixPayment(params: {
     expiresAt,
     isMock: false,
   }
+}
+
+// ─── Refund ──────────────────────────────────────────────────────────────────
+
+/**
+ * Estorna uma cobrança paga (total ou parcial). Usado na resolução de
+ * disputas com decisão refund_full/refund_partial.
+ * Em mock mode (ou charge mock), não chama a API.
+ */
+export async function refundPixPayment(params: {
+  chargeId: string
+  valueCents?: number // ausente = estorno total
+  description?: string
+}): Promise<{ isMock: boolean }> {
+  if (params.chargeId.startsWith('mock_') || isMockMode()) {
+    return { isMock: true }
+  }
+
+  await asaasRequest(`/payments/${params.chargeId}/refund`, 'POST', {
+    ...(params.valueCents !== undefined ? { value: params.valueCents / 100 } : {}),
+    ...(params.description ? { description: params.description } : {}),
+  })
+
+  return { isMock: false }
 }

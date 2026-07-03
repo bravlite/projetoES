@@ -1,7 +1,7 @@
 import { redirect, notFound } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { acceptQuote } from '@/server/requests'
+import { acceptQuote, cancelRequest } from '@/server/requests'
 import type {
   Profile,
   ServiceRequest,
@@ -50,7 +50,7 @@ export default async function PedidoDetailPage({
   searchParams,
 }: {
   params: { id: string }
-  searchParams: { reviewed?: string }
+  searchParams: { reviewed?: string; error?: string }
 }) {
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
     return (
@@ -104,7 +104,11 @@ export default async function PedidoDetailPage({
     req.current_provider_id === providerProfile.id
 
   // Orçamentos (customer vê todos do seu pedido; provider vê o próprio)
-  let quotes: (ServiceQuote & { providerName: string })[] = []
+  let quotes: (ServiceQuote & {
+    providerName: string
+    providerRating: number | null
+    providerReviewCount: number
+  })[] = []
 
   if (isCustomer && (req.status === 'quoted' || req.status === 'quote_accepted')) {
     const { data: rawQuotes } = await supabase
@@ -115,7 +119,23 @@ export default async function PedidoDetailPage({
 
     const rawList = (rawQuotes as ServiceQuote[]) ?? []
 
-    // Enriquece com nome do prestador
+    // Nota média por prestador (uma query para todos os orçamentos)
+    const providerIds = Array.from(new Set(rawList.map((q) => q.provider_id)))
+    const ratingByProvider = new Map<string, { sum: number; count: number }>()
+    if (providerIds.length > 0) {
+      const { data: rawReviews } = await supabase
+        .from('service_reviews')
+        .select('provider_id, rating')
+        .in('provider_id', providerIds)
+      for (const r of (rawReviews as { provider_id: string; rating: number }[]) ?? []) {
+        const agg = ratingByProvider.get(r.provider_id) ?? { sum: 0, count: 0 }
+        agg.sum += r.rating
+        agg.count += 1
+        ratingByProvider.set(r.provider_id, agg)
+      }
+    }
+
+    // Enriquece com nome e reputação do prestador
     quotes = await Promise.all(
       rawList.map(async (q) => {
         const { data: pp } = await supabase
@@ -123,9 +143,12 @@ export default async function PedidoDetailPage({
           .select('display_name')
           .eq('id', q.provider_id)
           .single()
+        const agg = ratingByProvider.get(q.provider_id)
         return {
           ...q,
           providerName: (pp as { display_name: string | null } | null)?.display_name ?? 'Prestador',
+          providerRating: agg ? agg.sum / agg.count : null,
+          providerReviewCount: agg?.count ?? 0,
         }
       })
     )
@@ -137,7 +160,14 @@ export default async function PedidoDetailPage({
       .eq('provider_id', providerProfile.id)
       .single()
     if (rawQ) {
-      quotes = [{ ...(rawQ as ServiceQuote), providerName: providerProfile.display_name ?? 'Eu' }]
+      quotes = [
+        {
+          ...(rawQ as ServiceQuote),
+          providerName: providerProfile.display_name ?? 'Eu',
+          providerRating: null,
+          providerReviewCount: 0,
+        },
+      ]
     }
   }
 
@@ -160,6 +190,13 @@ export default async function PedidoDetailPage({
           ← Pedidos
         </Link>
       </div>
+
+      {/* Banner de erro (redirects de actions) */}
+      {searchParams.error && (
+        <div className="mb-6 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+          {searchParams.error}
+        </div>
+      )}
 
       {/* Cabeçalho */}
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
@@ -237,7 +274,21 @@ export default async function PedidoDetailPage({
                       <p className="font-semibold text-gray-900">
                         R$ {(quote.value_cents / 100).toFixed(2)}
                       </p>
-                      <p className="mt-0.5 text-sm text-gray-600">{quote.providerName}</p>
+                      <p className="mt-0.5 text-sm text-gray-600">
+                        {quote.providerName}
+                        {quote.providerRating !== null ? (
+                          <span className="ml-2 inline-flex items-center gap-0.5 text-xs font-medium text-amber-600">
+                            ★ {quote.providerRating.toFixed(1).replace('.', ',')}
+                            <span className="text-gray-400">
+                              ({quote.providerReviewCount})
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="ml-2 text-xs text-gray-400">
+                            novo na plataforma
+                          </span>
+                        )}
+                      </p>
                       {quote.estimated_minutes && (
                         <p className="text-xs text-gray-400">
                           Estimativa: {quote.estimated_minutes} min
@@ -454,6 +505,38 @@ export default async function PedidoDetailPage({
           Pedido encerrado com reembolso ao cliente.
         </div>
       )}
+
+      {/* Prestador sumiu? — cliente pode abrir disputa após pagar */}
+      {isCustomer && (req.status === 'payment_confirmed' || req.status === 'checked_in') && (
+        <div className="mt-6 rounded-md bg-gray-50 px-4 py-3 text-sm text-gray-500">
+          O prestador não apareceu ou algo deu errado?{' '}
+          <Link href={`/pedidos/${req.id}/disputar`} className="font-medium text-red-600 hover:underline">
+            Abrir disputa
+          </Link>
+        </div>
+      )}
+
+      {/* Cancelamento — cliente, até o check-in (Termos §7) */}
+      {isCustomer &&
+        ['requested', 'quoted', 'quote_accepted', 'awaiting_payment', 'payment_confirmed'].includes(
+          req.status
+        ) && (
+          <div className="mt-8 border-t border-sand-200 pt-5">
+            <form action={cancelRequest.bind(null, req.id)}>
+              <button
+                type="submit"
+                className="text-sm font-medium text-gray-400 hover:text-red-600"
+              >
+                Cancelar pedido
+              </button>
+            </form>
+            <p className="mt-1 text-xs text-gray-400">
+              {req.status === 'payment_confirmed'
+                ? 'O valor pago será estornado integralmente (cancelamento permitido até o check-in).'
+                : 'Cancelamento gratuito antes do pagamento.'}
+            </p>
+          </div>
+        )}
     </div>
   )
 }

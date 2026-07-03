@@ -44,18 +44,20 @@ NEXT_PUBLIC_APP_URL           # URL pública do app (http://localhost:3000 em de
 
 > **`SUPABASE_SERVICE_ROLE_KEY` nunca deve ir para o client bundle.** Está protegida pelo `server-only` em `lib/supabase/admin.ts`.
 
-## Estado atual (Lote 2)
+## Estado atual
 
 | Camada | Status |
 |---|---|
-| Estrutura Next.js 14 + Tailwind | ✅ pronto |
-| Supabase client / server / admin | ✅ preparado (sem projeto real conectado) |
-| Validação de env vars (zod) | ✅ pronto |
-| Auth (login/cadastro real) | ⏳ Milestone 3 |
-| Banco / migrations / RLS | ⏳ Milestone 2–3 |
-| Pix / Asaas | ⏳ Milestone 5 |
-| Upload / Storage | ⏳ Milestone 6 |
-| Admin real | ⏳ Milestone 8 |
+| Estrutura Next.js 14 + Tailwind + identidade visual | ✅ pronto |
+| Auth (login/cadastro/onboarding) | ✅ pronto |
+| Banco / migrations / RLS (001–012) | ✅ pronto (aplicar no Supabase) |
+| Pedidos, orçamentos e feed | ✅ pronto |
+| Pix / Asaas (com modo mock p/ dev) | ✅ pronto |
+| Check-in, evidências, conclusão | ✅ pronto |
+| Disputas + estorno via Asaas | ✅ pronto |
+| Admin (disputas, repasses, métricas) | ✅ pronto |
+| Notificações (email/WhatsApp) | ⏳ próximo passo |
+| Testes automatizados | ⏳ próximo passo |
 
 ## Scripts
 

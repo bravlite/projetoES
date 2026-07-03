@@ -1,10 +1,13 @@
 // app/api/webhooks/asaas/route.ts
 // Recebe eventos de pagamento do PSP Asaas.
 // Autenticação via header asaas-access-token comparado ao ASAAS_WEBHOOK_TOKEN.
-// Idempotência garantida por psp_charge_id.
+// Idempotência garantida por claim atômico do payment (update condicional)
+// + UNIQUE em payouts.order_id (migration 012).
 
+import { randomInt } from 'crypto'
 import { NextRequest } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { computeCommission } from '@/lib/billing'
 
 // Eventos que indicam pagamento confirmado
 const CONFIRMED_EVENTS = new Set(['PAYMENT_RECEIVED', 'PAYMENT_CONFIRMED'])
@@ -22,8 +25,15 @@ type AsaasEvent = {
 
 export async function POST(request: NextRequest) {
   // ── Validação do token ────────────────────────────────────────────────────
+  // Em produção o token é obrigatório: sem ele, qualquer um poderia forjar
+  // "pagamento confirmado". Só aceita requests sem token em sandbox/dev.
   const webhookToken = process.env.ASAAS_WEBHOOK_TOKEN
-  if (webhookToken) {
+  if (!webhookToken) {
+    if (process.env.ASAAS_ENVIRONMENT === 'production') {
+      console.error('[webhook/asaas] ASAAS_WEBHOOK_TOKEN não configurado em produção')
+      return Response.json({ error: 'Webhook not configured' }, { status: 503 })
+    }
+  } else {
     const receivedToken = request.headers.get('asaas-access-token')
     if (receivedToken !== webhookToken) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -46,10 +56,10 @@ export async function POST(request: NextRequest) {
 
   const admin = createAdminClient() as any
 
-  // ── Busca pagamento por psp_charge_id (idempotência) ─────────────────────
+  // ── Busca pagamento por psp_charge_id ─────────────────────────────────────
   const { data: existingPayment } = await admin
     .from('payments')
-    .select('id, status, order_id, customer_id')
+    .select('id, status, order_id, customer_id, amount_cents')
     .eq('psp_charge_id', payment.id)
     .single()
 
@@ -58,14 +68,40 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: 'Payment not found' }, { status: 404 })
   }
 
-  // Já processado — responde OK (idempotência)
-  if (existingPayment.status === 'paid') {
+  const now = new Date().toISOString()
+
+  // ── Claim atômico (idempotência real) ─────────────────────────────────────
+  // O Asaas reenvia eventos (PAYMENT_CONFIRMED + PAYMENT_RECEIVED + retries);
+  // só 'pending' pode virar 'paid'. Estados terminais ('paid', 'refunded',
+  // 'expired') NÃO são reivindicáveis — senão um segundo evento de confirmação
+  // ressuscitaria um pagamento já estornado de volta para 'paid'.
+  const { data: claimed } = await admin
+    .from('payments')
+    .update({
+      status: 'paid',
+      paid_at: now,
+      webhook_payload: body,
+    })
+    .eq('id', existingPayment.id)
+    .eq('status', 'pending')
+    .select('id')
+
+  if (!claimed || claimed.length === 0) {
+    // Já processado / estornado / expirado — responde OK (idempotência)
     return Response.json({ ok: true, idempotent: true })
   }
 
   const orderId: string = existingPayment.order_id
-  const now = new Date().toISOString()
-  const grossCents = Math.round(payment.value * 100)
+
+  // ── Valor: fonte de verdade é o banco, não o payload do evento ────────────
+  const grossCents: number = existingPayment.amount_cents
+  const receivedCents = Math.round(payment.value * 100)
+  if (receivedCents !== grossCents) {
+    console.warn(
+      `[webhook/asaas] Divergência de valor no charge ${payment.id}: ` +
+        `esperado ${grossCents}, recebido ${receivedCents}`
+    )
+  }
 
   // ── Busca estado atual do pedido ─────────────────────────────────────────
   const { data: sr } = await admin
@@ -78,37 +114,51 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: 'Order not found' }, { status: 404 })
   }
 
-  // Gera código de check-in: 6 dígitos entre 100000-999999
-  const checkInCode = (Math.floor(100000 + Math.random() * 900000)).toString()
+  // Gera código de check-in: 6 dígitos, gerador criptográfico
+  const checkInCode = randomInt(100000, 1000000).toString()
 
-  // ── Comissão: 15%, mínimo R$10 ───────────────────────────────────────────
-  const commissionRate = 0.15
-  const minCommissionCents = 1000
-  const commissionCents = Math.max(Math.round(grossCents * commissionRate), minCommissionCents)
-  const netCents = grossCents - commissionCents
-
-  // ── Atualiza payment ──────────────────────────────────────────────────────
-  await admin
-    .from('payments')
-    .update({
-      status: 'paid',
-      paid_at: now,
-      webhook_payload: body,
-    })
-    .eq('id', existingPayment.id)
+  // ── Comissão: 15%, mínimo R$10 (regras em lib/billing.ts) ────────────────
+  const { commissionCents, netCents, commissionRate, minCommissionCents } =
+    computeCommission(grossCents)
 
   // ── Atualiza service_request ──────────────────────────────────────────────
-  await admin
+  // Só avança de um estado pré-pagamento. Se o pedido já foi cancelado/estornado
+  // (ex.: cliente cancelou entre os dois eventos do Asaas), NÃO o ressuscita
+  // nem regenera check_in_code. Sem linhas afetadas → não cria payout.
+  const { data: advancedOrder } = await admin
     .from('service_requests')
     .update({
       status: 'payment_confirmed',
       check_in_code: checkInCode,
     })
     .eq('id', orderId)
+    .in('status', ['awaiting_payment', 'quote_accepted'])
+    .select('id')
+
+  if (!advancedOrder || advancedOrder.length === 0) {
+    // Pagamento confirmado, mas o pedido não estava aguardando pagamento.
+    // Corrida com cancelamento: o dinheiro entrou e precisa ser estornado.
+    console.error(
+      `[webhook/asaas] Pagamento ${payment.id} confirmado para pedido ${orderId} ` +
+        `em estado '${sr.status}' (não aguardava pagamento). Estorno manual necessário.`
+    )
+    await admin.from('financial_events').insert({
+      event_type: 'payment_on_terminal_order',
+      order_id: orderId,
+      payment_id: existingPayment.id,
+      amount_cents: grossCents,
+      metadata: {
+        psp_charge_id: payment.id,
+        order_status: sr.status,
+        needs_manual_refund: true,
+      },
+    })
+    return Response.json({ ok: true, order_not_awaiting_payment: true })
+  }
 
   // ── Cria payout (status=pending — elegível após conclusão) ────────────────
   if (sr.current_provider_id) {
-    await admin.from('payouts').insert({
+    const { error: payoutErr } = await admin.from('payouts').insert({
       order_id: orderId,
       provider_id: sr.current_provider_id,
       payment_id: existingPayment.id,
@@ -119,6 +169,10 @@ export async function POST(request: NextRequest) {
       min_commission_cents: minCommissionCents,
       status: 'pending',
     })
+    // 23505 = payout já existe para este pedido (UNIQUE payouts.order_id) — ok
+    if (payoutErr && payoutErr.code !== '23505') {
+      console.error(`[webhook/asaas] Falha ao criar payout do pedido ${orderId}:`, payoutErr)
+    }
   }
 
   // ── Audit trail ───────────────────────────────────────────────────────────

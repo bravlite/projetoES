@@ -212,15 +212,33 @@ export async function addEvidence(formData: FormData): Promise<{ error?: string 
     return { error: 'Status inválido para upload de evidência.' }
   }
 
+  // Normaliza a imagem antes de armazenar:
+  //  • redimensiona para no máx. 1600px (prova de serviço não precisa de 12MP)
+  //  • reencoda em WebP q75 → ~10-20x menos storage que o original do celular
+  //  • .rotate() aplica a orientação do EXIF e o reencode DESCARTA os metadados,
+  //    removendo o GPS embutido (a coordenada da casa do cliente) — minimização
+  //    de dados (LGPD Art. 6º, III) e coerência com o "sem localização".
+  const inputBuffer = Buffer.from(await file.arrayBuffer())
+  let processed: Buffer
+  try {
+    const sharp = (await import('sharp')).default
+    processed = await sharp(inputBuffer)
+      .rotate()
+      .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 75 })
+      .toBuffer()
+  } catch (err) {
+    console.error('[addEvidence] Falha ao processar imagem:', err)
+    return { error: 'Não foi possível processar a imagem. Tente outra foto.' }
+  }
+
   // Upload para Supabase Storage (bucket 'evidence')
-  const ext = (file.name.split('.').pop() ?? 'jpg').toLowerCase()
-  const filePath = `${requestId}/${providerProfile.id}/${kind}_${Date.now()}.${ext}`
-  const buffer = Buffer.from(await file.arrayBuffer())
+  const filePath = `${requestId}/${providerProfile.id}/${kind}_${Date.now()}.webp`
 
   const { error: uploadError } = await supabase.storage
     .from('evidence')
-    .upload(filePath, buffer, {
-      contentType: file.type || 'image/jpeg',
+    .upload(filePath, processed, {
+      contentType: 'image/webp',
       upsert: false,
     })
 
@@ -296,9 +314,14 @@ export async function markCompleted(requestId: string, _formData: FormData): Pro
     redirect(`/pedidos/${requestId}/evidencias?missing=after`)
   }
 
+  // provider_completed_at é o relógio do auto-aceite (24/48h) — updated_at
+  // muda em qualquer alteração da linha e resetaria o timer
   await admin
     .from('service_requests')
-    .update({ status: 'completed_by_provider' })
+    .update({
+      status: 'completed_by_provider',
+      provider_completed_at: new Date().toISOString(),
+    })
     .eq('id', requestId)
 
   await admin.from('service_order_events').insert({

@@ -64,11 +64,13 @@ export default async function FeedPage() {
     )
   }
 
-  // Busca pedidos em status 'requested' (RLS garante apenas approved providers)
+  // Pedidos abertos para orçamento: 'requested' E 'quoted' — o pedido continua
+  // no feed até o cliente aceitar um orçamento (senão o primeiro orçamento
+  // esconderia o pedido dos demais prestadores e mataria a comparação).
   const { data: rawRequests } = await supabase
     .from('service_requests')
     .select('id, category_slug, description, neighborhood, urgency, desired_date, desired_period, created_at')
-    .eq('status', 'requested')
+    .in('status', ['requested', 'quoted'])
     .order('created_at', { ascending: false })
     .limit(100)
 

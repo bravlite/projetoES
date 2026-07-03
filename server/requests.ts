@@ -3,7 +3,8 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { createAsaasCustomer, createPixPayment } from '@/lib/asaas'
+import { createAsaasCustomer, createPixPayment, refundPixPayment } from '@/lib/asaas'
+import { isValidQuoteValue, MIN_QUOTE_CENTS } from '@/lib/billing'
 
 // -----------------------------------------------------------------------
 // createServiceRequest
@@ -93,6 +94,10 @@ export async function submitQuote(
   const valueCents = Math.round(parseFloat(valueStr) * 100)
   if (!valueStr || isNaN(valueCents) || valueCents <= 0) {
     return { error: 'Valor inválido. Informe um valor maior que zero.' }
+  }
+  // Comissão mínima é R$10 — abaixo de R$30 o repasse líquido fica desproporcional/negativo
+  if (!isValidQuoteValue(valueCents)) {
+    return { error: `O valor mínimo de um orçamento é R$ ${(MIN_QUOTE_CENTS / 100).toFixed(2)}.` }
   }
 
   const estimatedMinutesStr = formData.get('estimated_minutes') as string
@@ -197,6 +202,25 @@ export async function acceptQuote(quoteId: string, _formData: FormData): Promise
     redirect(`/pedidos?error=Sem permissão.`)
   }
 
+  // Claim atômico do pedido — o filtro de status impede aceitar dois
+  // orçamentos em corrida (dois cliques/abas simultâneos)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: claimedReq } = await (admin as any)
+    .from('service_requests')
+    .update({
+      status: 'quote_accepted',
+      accepted_quote_id: quoteId,
+      current_provider_id: quote.provider_id,
+      final_value_cents: quote.value_cents,
+    })
+    .eq('id', quote.request_id)
+    .in('status', ['requested', 'quoted'])
+    .select('id')
+
+  if (!claimedReq || claimedReq.length === 0) {
+    redirect(`/pedidos/${quote.request_id}?error=Este pedido já teve um orçamento aceito.`)
+  }
+
   // Aceita este orçamento
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (admin as any).from('service_quotes').update({ status: 'accepted' }).eq('id', quoteId)
@@ -210,15 +234,6 @@ export async function acceptQuote(quoteId: string, _formData: FormData): Promise
     .neq('id', quoteId)
     .eq('status', 'pending')
 
-  // Atualiza o pedido
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (admin as any).from('service_requests').update({
-    status: 'quote_accepted',
-    accepted_quote_id: quoteId,
-    current_provider_id: quote.provider_id,
-    final_value_cents: quote.value_cents,
-  }).eq('id', quote.request_id)
-
   // Log de evento: quote_accepted
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (admin as any).from('service_order_events').insert({
@@ -231,6 +246,9 @@ export async function acceptQuote(quoteId: string, _formData: FormData): Promise
   })
 
   // ── Gera cobrança Pix ──────────────────────────────────────────────────────
+  // IMPORTANTE: redirect() do Next.js funciona lançando uma exceção — nunca
+  // chamar dentro deste try, senão o catch a engole e o fluxo quebra.
+  let paymentReady = false
   try {
     // Busca perfil do cliente para obter nome e asaas_customer_id
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -295,11 +313,140 @@ export async function acceptQuote(quoteId: string, _formData: FormData): Promise
       payload: { psp_charge_id: pix.chargeId, is_mock: pix.isMock },
     })
 
-    redirect(`/pedidos/${quote.request_id}/pagamento`)
-  } catch {
+    paymentReady = true
+  } catch (err) {
     // Falha ao gerar Pix: pedido fica em quote_accepted, cliente pode tentar novamente
-    redirect(`/pedidos/${quote.request_id}`)
+    console.error('[acceptQuote] Falha ao gerar cobrança Pix:', err)
   }
+
+  if (paymentReady) {
+    redirect(`/pedidos/${quote.request_id}/pagamento`)
+  }
+  redirect(`/pedidos/${quote.request_id}`)
+}
+
+// -----------------------------------------------------------------------
+// cancelRequest
+// Cliente cancela o próprio pedido — permitido até o check-in (Termos §7).
+// Antes do pagamento: cancela direto. Depois de pago (payment_confirmed):
+// estorna o Pix integral via Asaas e bloqueia o repasse.
+// -----------------------------------------------------------------------
+const CANCELLABLE_STATUSES = [
+  'requested',
+  'quoted',
+  'quote_accepted',
+  'awaiting_payment',
+  'payment_confirmed',
+] as const
+
+export async function cancelRequest(orderId: string, _formData: FormData): Promise<void> {
+  const supabase = createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const admin = createAdminClient()
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: r } = await (admin as any)
+    .from('service_requests')
+    .select('id, status, customer_id')
+    .eq('id', orderId)
+    .single()
+  const req = r as { id: string; status: string; customer_id: string } | null
+
+  if (!req || req.customer_id !== user.id) redirect('/pedidos')
+  if (!CANCELLABLE_STATUSES.includes(req.status as (typeof CANCELLABLE_STATUSES)[number])) {
+    redirect(`/pedidos/${orderId}?error=Após o check-in o pedido não pode mais ser cancelado — abra uma disputa.`)
+  }
+
+  // Claim atômico — evita corrida com webhook/aceite simultâneo
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: claimed } = await (admin as any)
+    .from('service_requests')
+    .update({ status: 'cancelled' })
+    .eq('id', orderId)
+    .in('status', CANCELLABLE_STATUSES as unknown as string[])
+    .select('id')
+
+  if (!claimed || claimed.length === 0) {
+    redirect(`/pedidos/${orderId}?error=O pedido mudou de situação e não pôde ser cancelado.`)
+  }
+
+  // Expira cobranças pendentes
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (admin as any)
+    .from('payments')
+    .update({ status: 'expired' })
+    .eq('order_id', orderId)
+    .eq('status', 'pending')
+
+  // Pedido já pago → estorno integral (Termos: reembolso antes do check-in)
+  if (req.status === 'payment_confirmed') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: paidRow } = await (admin as any)
+      .from('payments')
+      .select('id, psp_charge_id, amount_cents')
+      .eq('order_id', orderId)
+      .eq('status', 'paid')
+      .maybeSingle()
+    const paid = paidRow as {
+      id: string
+      psp_charge_id: string | null
+      amount_cents: number
+    } | null
+
+    if (paid?.psp_charge_id) {
+      try {
+        const { isMock } = await refundPixPayment({
+          chargeId: paid.psp_charge_id,
+          description: `Cancelamento do pedido ${orderId.slice(0, 8)} antes do check-in`,
+        })
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (admin as any).from('payments').update({ status: 'refunded' }).eq('id', paid.id)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (admin as any)
+          .from('payouts')
+          .update({ status: 'refunded_to_customer' })
+          .eq('order_id', orderId)
+          .in('status', ['pending', 'holding'])
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (admin as any).from('financial_events').insert({
+          event_type: 'refund_issued',
+          order_id: orderId,
+          payment_id: paid.id,
+          actor_id: user.id,
+          amount_cents: paid.amount_cents,
+          metadata: { reason: 'customer_cancel_before_checkin', is_mock: isMock },
+        })
+      } catch (err) {
+        console.error(`[cancelRequest] Estorno falhou para pedido ${orderId}:`, err)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (admin as any).from('financial_events').insert({
+          event_type: 'refund_failed',
+          order_id: orderId,
+          payment_id: paid.id,
+          actor_id: user.id,
+          amount_cents: paid.amount_cents,
+          metadata: { reason: 'customer_cancel_before_checkin', needs_manual_refund: true },
+        })
+      }
+    }
+  }
+
+  // Audit trail
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (admin as any).from('service_order_events').insert({
+    request_id: orderId,
+    from_status: req.status,
+    to_status: 'cancelled',
+    actor_id: user.id,
+    actor_role: 'customer',
+    payload: { refunded: req.status === 'payment_confirmed' },
+  })
+
+  redirect(`/pedidos/${orderId}`)
 }
 
 // -----------------------------------------------------------------------
